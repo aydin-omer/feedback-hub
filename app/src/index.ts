@@ -56,6 +56,6 @@ export default {
       return json({ error: "Method not allowed" }, 405);
     }
 
-    return new Response("Hello from Feedback Hub!");
+    return json({ error: "Not found" }, 404);
   },
 } satisfies ExportedHandler<Env>;
