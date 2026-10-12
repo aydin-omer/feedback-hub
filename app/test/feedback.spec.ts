@@ -3,7 +3,7 @@ import {
   createExecutionContext,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker from "../src/index";
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
@@ -27,6 +27,15 @@ async function countFeedback() {
     .first<{ count: number }>();
   return row?.count ?? 0;
 }
+
+// These tests are about saving feedback, not about AI: block all network calls
+beforeEach(() => {
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No network in tests"));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("POST /api/feedback (US-1)", () => {
   it("saves valid feedback and returns its id", async () => {
