@@ -103,3 +103,9 @@ As a PM, I want the public form to be protected from abuse, so that the data sta
 | Q2 | Should AI classification happen *while* the user waits, or *after* the submission is saved? | (a) synchronous: slower confirmation, simpler code, (b) asynchronous: instant confirmation, more moving parts | (a) for the MVP |
 | Q3 | What is the spam limit? | e.g. 5 submissions per visitor per hour | 5 / hour |
 | Q4 | Can the PM correct a wrong AI label? | (a) yes, in the MVP, (b) later version | (b) later |
+
+## 9. Decision log
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-10-12 | Q2 changed: classification runs in the background right after the response is sent (Cloudflare `waitUntil`), instead of synchronously while the user waits | Gemini's response time is outside our control and could break the 3-second confirmation target in US-1. Background processing keeps confirmations instant, needs no extra infrastructure, and feedback is still never lost if the AI call fails. |
