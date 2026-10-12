@@ -1,12 +1,31 @@
+import { classifyFeedback } from "./classify";
+
 const MAX_MESSAGE_LENGTH = 2000;
 
-// Small helper so every response is JSON with the right status code
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
-async function handleCreateFeedback(request: Request, env: Env): Promise<Response> {
-  // 1. Is the body valid JSON at all?
+// NEW: runs in the background after the user already got their confirmation
+async function classifyAndStore(env: Env, id: number, message: string): Promise<void> {
+  try {
+    const result = await classifyFeedback(message, env.GEMINI_API_KEY);
+    await env.DB.prepare(
+      "UPDATE feedback SET type = ?, sentiment = ?, urgency = ?, summary = ?, status = 'classified' WHERE id = ?",
+    )
+      .bind(result.type, result.sentiment, result.urgency, result.summary, id)
+      .run();
+  } catch (error) {
+    // The feedback is already saved as 'unclassified', so nothing is lost
+    console.error(`Classification failed for feedback ${id}:`, error);
+  }
+}
+
+async function handleCreateFeedback(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext, // NEW: needed for waitUntil
+): Promise<Response> {
   let body: unknown;
   try {
     body = await request.json();
@@ -20,7 +39,6 @@ async function handleCreateFeedback(request: Request, env: Env): Promise<Respons
 
   const { message, email } = body as { message?: unknown; email?: unknown };
 
-  // 2. Validate the message (US-1 acceptance criteria)
   if (typeof message !== "string" || message.trim() === "") {
     return json({ error: "Message is required" }, 400);
   }
@@ -29,29 +47,32 @@ async function handleCreateFeedback(request: Request, env: Env): Promise<Respons
     return json({ error: `Message must be at most ${MAX_MESSAGE_LENGTH} characters` }, 400);
   }
 
-  // 3. Validate the optional email
   if (email !== undefined && email !== null && typeof email !== "string") {
     return json({ error: "Email must be a string" }, 400);
   }
   const cleanEmail = typeof email === "string" && email.trim() !== "" ? email.trim() : null;
 
-  // 4. Save it. The "?" placeholders keep user input separate from the SQL command
   const result = await env.DB.prepare(
     "INSERT INTO feedback (message, email) VALUES (?, ?) RETURNING id",
   )
     .bind(cleanMessage, cleanEmail)
     .first<{ id: number }>();
 
-  return json({ id: result!.id }, 201);
+  const id = result!.id;
+
+  // NEW: answer the user now, classify after the response is sent
+  ctx.waitUntil(classifyAndStore(env, id, cleanMessage));
+
+  return json({ id }, 201);
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/feedback") {
       if (request.method === "POST") {
-        return handleCreateFeedback(request, env);
+        return handleCreateFeedback(request, env, ctx);
       }
       return json({ error: "Method not allowed" }, 405);
     }
