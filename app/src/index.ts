@@ -1,12 +1,13 @@
 import { classifyFeedback } from "./classify";
+import { MAX_SUBMISSIONS_PER_HOUR, countRecentSubmissions, hashIp } from "./rate-limit"; // NEW
 
 const MAX_MESSAGE_LENGTH = 2000;
 
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, { status });
+// NEW: optional headers parameter, needed for Retry-After
+function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
+  return Response.json(data, { status, headers });
 }
 
-// NEW: runs in the background after the user already got their confirmation
 async function classifyAndStore(env: Env, id: number, message: string): Promise<void> {
   try {
     const result = await classifyFeedback(message, env.GEMINI_API_KEY);
@@ -16,7 +17,6 @@ async function classifyAndStore(env: Env, id: number, message: string): Promise<
       .bind(result.type, result.sentiment, result.urgency, result.summary, id)
       .run();
   } catch (error) {
-    // The feedback is already saved as 'unclassified', so nothing is lost
     console.error(`Classification failed for feedback ${id}:`, error);
   }
 }
@@ -24,7 +24,7 @@ async function classifyAndStore(env: Env, id: number, message: string): Promise<
 async function handleCreateFeedback(
   request: Request,
   env: Env,
-  ctx: ExecutionContext, // NEW: needed for waitUntil
+  ctx: ExecutionContext,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -52,15 +52,25 @@ async function handleCreateFeedback(
   }
   const cleanEmail = typeof email === "string" && email.trim() !== "" ? email.trim() : null;
 
+  // NEW: rate limiting (US-6)
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ipHash = await hashIp(ip, env.IP_HASH_SALT);
+  if ((await countRecentSubmissions(env.DB, ipHash)) >= MAX_SUBMISSIONS_PER_HOUR) {
+    return json(
+      { error: "Too many submissions. Please try again later." },
+      429,
+      { "Retry-After": "3600" },
+    );
+  }
+
+  // CHANGED: ip_hash is saved too
   const result = await env.DB.prepare(
-    "INSERT INTO feedback (message, email) VALUES (?, ?) RETURNING id",
+    "INSERT INTO feedback (message, email, ip_hash) VALUES (?, ?, ?) RETURNING id",
   )
-    .bind(cleanMessage, cleanEmail)
+    .bind(cleanMessage, cleanEmail, ipHash)
     .first<{ id: number }>();
 
   const id = result!.id;
-
-  // NEW: answer the user now, classify after the response is sent
   ctx.waitUntil(classifyAndStore(env, id, cleanMessage));
 
   return json({ id }, 201);
