@@ -12,7 +12,7 @@ const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 async function postFeedback(body: string) {
   const request = new IncomingRequest("http://example.com/api/feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "CF-Connecting-IP": crypto.randomUUID() },
     body,
   });
   const ctx = createExecutionContext();
