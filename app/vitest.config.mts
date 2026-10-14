@@ -13,7 +13,7 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations, GEMINI_API_KEY: "test-key" },
+            bindings: { TEST_MIGRATIONS: migrations, GEMINI_API_KEY: "test-key", IP_HASH_SALT: "test-salt" },
         },
       }),
     ],
