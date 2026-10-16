@@ -1,5 +1,6 @@
 import { classifyFeedback } from "./classify";
 import { MAX_SUBMISSIONS_PER_HOUR, countRecentSubmissions, hashIp } from "./rate-limit"; // NEW
+import { isAdminPath, isAuthorized, unauthorized } from "./auth";
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -79,6 +80,19 @@ async function handleCreateFeedback(
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
+
+    // The guard runs first, before any admin page or admin API is reached (US-5)
+    if (isAdminPath(url.pathname)) {
+      if (!(await isAuthorized(request, env.ADMIN_PASSWORD))) {
+        return unauthorized();
+      }
+      if (url.pathname.startsWith("/api/admin")) {
+        // Admin API endpoints come in US-3
+        return json({ error: "Not found" }, 404);
+      }
+      // Authorized: serve the dashboard page from the static files
+      return env.ASSETS.fetch(request);
+    }
 
     if (url.pathname === "/api/feedback") {
       if (request.method === "POST") {
