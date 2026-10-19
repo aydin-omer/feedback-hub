@@ -1,6 +1,7 @@
 import { classifyFeedback } from "./classify";
 import { MAX_SUBMISSIONS_PER_HOUR, countRecentSubmissions, hashIp } from "./rate-limit"; // NEW
 import { isAdminPath, isAuthorized, unauthorized } from "./auth";
+import { listFeedback } from "./admin";
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -86,8 +87,13 @@ export default {
       if (!(await isAuthorized(request, env.ADMIN_PASSWORD))) {
         return unauthorized();
       }
+      if (url.pathname === "/api/admin/feedback") {
+        if (request.method === "GET") {
+          return listFeedback(env);
+        }
+        return json({ error: "Method not allowed" }, 405);
+      }
       if (url.pathname.startsWith("/api/admin")) {
-        // Admin API endpoints come in US-3
         return json({ error: "Not found" }, 404);
       }
       // Authorized: serve the dashboard page from the static files
