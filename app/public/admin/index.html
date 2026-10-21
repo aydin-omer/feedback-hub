@@ -20,12 +20,35 @@
     .meta { color: #78716c; font-size: 13px; margin: 0; }
     .state { color: #78716c; }
 
-    .item {
+    .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .count {
       background: white;
       border: 1px solid #e7e5e4;
-      border-radius: 12px;
-      margin-bottom: 12px;
+      border-radius: 10px;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      color: #57534e;
+      text-align: left;
     }
+    button.count { cursor: pointer; }
+    button.count:hover { border-color: #a8a29e; }
+    .count.active { border-color: #1c1917; color: #1c1917; }
+    .count strong { display: block; font-size: 20px; color: #1c1917; }
+
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    select, .clear {
+      padding: 7px 10px;
+      border: 1px solid #d6d3d1;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 14px;
+      background: white;
+      color: #1c1917;
+    }
+    .clear { cursor: pointer; }
+
+    .item { background: white; border: 1px solid #e7e5e4; border-radius: 12px; margin-bottom: 12px; }
     .item:hover { border-color: #a8a29e; }
     .item summary { list-style: none; cursor: pointer; padding: 16px 18px; }
     .item summary::-webkit-details-marker { display: none; }
@@ -56,6 +79,16 @@
       <h1>Feedback</h1>
       <p class="meta" id="count"></p>
     </header>
+
+    <div class="counts" id="counts"></div>
+
+    <div class="toolbar">
+      <select id="filter-type" aria-label="Filter by type"></select>
+      <select id="filter-sentiment" aria-label="Filter by sentiment"></select>
+      <select id="filter-urgency" aria-label="Filter by urgency"></select>
+      <button class="clear" id="clear" type="button">Clear filters</button>
+    </div>
+
     <p class="state" id="state">Loading...</p>
     <div id="list"></div>
   </main>
@@ -67,10 +100,19 @@
       ux_issue: "UX issue",
       praise: "Praise",
       other: "Other",
+      unclassified: "Unclassified",
+    };
+    const TYPES = ["bug", "feature_request", "ux_issue", "praise", "other"];
+    const SENTIMENTS = ["positive", "neutral", "negative"];
+    const URGENCIES = ["high", "medium", "low"];
+
+    const filters = {
+      type: document.getElementById("filter-type"),
+      sentiment: document.getElementById("filter-sentiment"),
+      urgency: document.getElementById("filter-urgency"),
     };
 
-    // Creates an element. User data always goes through textContent,
-    // so it is displayed as text and can never run as code (XSS protection)
+    // User data always goes through textContent: shown as text, never run as code
     function el(tag, className, text) {
       const node = document.createElement(tag);
       if (className) node.className = className;
@@ -78,7 +120,17 @@
       return node;
     }
 
-    // The database stores UTC time; show it in the viewer's own time zone
+    function fillSelect(select, allLabel, values, labels) {
+      select.append(new Option(allLabel, ""));
+      for (const value of values) {
+        select.append(new Option(labels ? labels[value] : value, value));
+      }
+    }
+
+    fillSelect(filters.type, "All types", TYPES, TYPE_LABELS);
+    fillSelect(filters.sentiment, "All sentiments", SENTIMENTS);
+    fillSelect(filters.urgency, "All urgencies", URGENCIES);
+
     function formatDate(value) {
       return new Date(value.replace(" ", "T") + "Z").toLocaleString();
     }
@@ -110,40 +162,83 @@
         body.append(reply);
       }
       details.append(body);
-
       return details;
     }
 
+    function renderCounts(counts) {
+      const container = document.getElementById("counts");
+      container.replaceChildren();
+      for (const type of [...TYPES, "unclassified"]) {
+        // Type counts are clickable shortcuts for the type filter
+        const isFilterable = type !== "unclassified";
+        const card = el(isFilterable ? "button" : "div", "count");
+        if (isFilterable) {
+          card.type = "button";
+          if (filters.type.value === type) card.classList.add("active");
+          card.addEventListener("click", () => {
+            filters.type.value = filters.type.value === type ? "" : type;
+            load();
+          });
+        }
+        card.append(el("strong", null, String(counts[type] ?? 0)));
+        card.append(document.createTextNode(TYPE_LABELS[type]));
+        container.append(card);
+      }
+    }
+
+    // Only the newest request may update the screen, so fast filter
+    // changes can't show the results of an older, slower request
+    let latestRequest = 0;
+
     async function load() {
+      const requestId = ++latestRequest;
       const state = document.getElementById("state");
+      const list = document.getElementById("list");
+      state.textContent = "Loading...";
+      state.hidden = false;
+
+      const params = new URLSearchParams();
+      for (const [name, select] of Object.entries(filters)) {
+        if (select.value) params.set(name, select.value);
+      }
+
       try {
-        const response = await fetch("/api/admin/feedback");
+        const response = await fetch("/api/admin/feedback?" + params.toString());
+        if (requestId !== latestRequest) return;
+
         if (response.status === 401) {
           state.textContent = "Your session has expired. Reload the page to sign in again.";
           return;
         }
-        if (!response.ok) {
-          throw new Error("Status " + response.status);
-        }
+        if (!response.ok) throw new Error("Status " + response.status);
 
-        const { items } = await response.json();
+        const { items, counts } = await response.json();
+        if (requestId !== latestRequest) return;
+
+        renderCounts(counts);
+        list.replaceChildren(...items.map(renderItem));
         document.getElementById("count").textContent =
-          items.length === 1 ? "1 item" : items.length + " items";
+          items.length === 1 ? "Showing 1 item" : "Showing " + items.length + " items";
 
         if (items.length === 0) {
-          state.textContent = "No feedback yet.";
-          return;
-        }
-
-        state.remove();
-        const list = document.getElementById("list");
-        for (const item of items) {
-          list.append(renderItem(item));
+          state.textContent = params.toString() ? "No feedback matches these filters." : "No feedback yet.";
+        } else {
+          state.hidden = true;
         }
       } catch {
-        state.textContent = "Could not load feedback. Please try again.";
+        if (requestId === latestRequest) {
+          state.textContent = "Could not load feedback. Please try again.";
+        }
       }
     }
+
+    for (const select of Object.values(filters)) {
+      select.addEventListener("change", load);
+    }
+    document.getElementById("clear").addEventListener("click", () => {
+      for (const select of Object.values(filters)) select.value = "";
+      load();
+    });
 
     load();
   </script>
