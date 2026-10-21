@@ -89,7 +89,7 @@ export default {
       }
       if (url.pathname === "/api/admin/feedback") {
         if (request.method === "GET") {
-          return listFeedback(env);
+          return listFeedback(env, url);
         }
         return json({ error: "Method not allowed" }, 405);
       }
