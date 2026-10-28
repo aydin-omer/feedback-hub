@@ -105,3 +105,7 @@ npm test
 ## Status
 
 All six MVP user stories are done. Possible next steps are listed in the PRD's out-of-scope section, such as grouping similar feedback into themes and correcting AI labels from the dashboard.
+
+## Related
+
+- [feedback-hub-mcp](https://github.com/aydin-omer/feedback-hub-mcp): an MCP server that lets AI assistants like Claude read and analyze Feedback Hub data.
